@@ -1,0 +1,5 @@
+[package]
+name = "gaia_engine"
+version = "0.1.0"\nedition = "2021"
+
+[dependencies]

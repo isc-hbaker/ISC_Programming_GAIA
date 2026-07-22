@@ -1,20 +1,125 @@
 ROUTINE RunScript
- #; We will run this routine to do the benchmark
+ #; Gaia Challenge Benchmark Entry Point
+ #; 
+ #; This routine demonstrates running each processor implementation.
+ #; Judges: uncomment the processor you wish to test.
+ #;
+
 Run()
 {
- #; extract files if necessary from .data/in to .data/temp
-
- #; Start time
- Set startTime = $ZHOROLOG
-
- #; Insert the call to your method/rountine that
- #; - reads the csv files from ./data/in or .data/temp
- #; - processes data
- #; - creates output file in .data/out
-
- #; End time
- Set endTime = $ZHOROLOG
- #; Elapsed time in seconds
- Set elapsed = endTime - startTime
- Write "Elapsed time: ", elapsed, " seconds", !
+    Write !,"==========================================================="
+    Write !,"  Gaia Challenge - Benchmark Runner"
+    Write !,"==========================================================="
+    Write !
+    
+    #; Example input file (adjust path as needed)
+    Set inputFile = "/data/in/sample.csv"
+    Set threshold = 100
+    
+    Write "Input: ", inputFile, !
+    Write "Threshold: ", threshold, "%", !
+    Write !
+    
+    #; =========================================================
+    #; OPTION A: Run ObjectScript Processor (Pure Native IRIS)
+    #; =========================================================
+    Do RunObjectScript(inputFile, threshold)
+    
+    #; =========================================================
+    #; OPTION B: Run Rust Processor (High Performance)
+    #; =========================================================
+    #; Do RunRust(inputFile, threshold)
+    
+    #; =========================================================
+    #; OPTION C: Run APL Processor (Code Golf)
+    #; =========================================================
+    #; Do RunAPL(inputFile, threshold)
 }
+
+###;
+#; === ObjectScript Implementation ===
+#;
+RunObjectScript(inputFile, threshold)
+{
+    Write !,"==========================================================="
+    Write !,"  ObjectScript Processor"
+    Write !,"==========================================================="
+    
+    Set startTime = $ZHOROLOG
+    
+    #; Call the ObjectScript processor
+    Set tSC = ##class(Gaia.ObjectScriptProcessor).Run(inputFile, threshold)
+    
+    Set endTime = $ZHOROLOG
+    Set elapsed = endTime - startTime
+    
+    Write !,"Elapsed time: ", elapsed, " seconds", !
+    
+    If $$$ISERR(tSC) {
+        Write "ERROR: ", $System.Status.GetErrorText(tSC), !
+        Quit
+    }
+    
+    #; Query results from global
+    Write !,"Results stored in ^Gaia.DataD and ^Gaia.DataI globals"
+    Write !
+    Quit
+}
+
+###;
+#; === Rust Implementation ===
+#;
+RunRust(inputFile, threshold)
+{
+    Write !,"==========================================================="
+    Write !,"  Rust Processor"
+    Write !,"==========================================================="
+    
+    Set startTime = $ZHOROLOG
+    
+    #; Call the Rust processor
+    Set tSC = ##class(Gaia.RustProcessor).Run(inputFile, threshold)
+    
+    Set endTime = $ZHOROLOG
+    Set elapsed = endTime - startTime
+    
+    Write !,"Elapsed time: ", elapsed, " seconds", !
+    
+    If $$$ISERR(tSC) {
+        Write "ERROR: ", $System.Status.GetErrorText(tSC), !
+        Quit
+    }
+    
+    #; Query results from global
+    Write !,"Results stored in ^Gaia.DataD and ^Gaia.DataI globals"
+    Write !
+    Quit
+}
+
+###;
+#; === APL Implementation ===
+#;
+RunAPL(inputFile, threshold)
+{
+    Write !,"==========================================================="
+    Write !,"  APL Processor"
+    Write !,"==========================================================="
+    
+    Write !,"To run APL processor directly:"
+    Write !,"  dyalogscript src/apl/gaia.apl input.csv output.csv ", threshold, !
+    Write !
+    Write !,"Note: APL processor must be run from shell, not from ObjectScript."
+    Write !
+    Quit
+}
+
+###;
+#; === Via Service API (Generic) ===
+#;
+#; You can also call processors through the Service API:
+#; 
+#;   Set tSC = ##class(Gaia.Service).Process("objectscript", "/data/in/sample.csv", 100)
+#;   Set tSC = ##class(Gaia.Service).Process("rust", "/data/in/sample.csv", 100)
+#;   Set tSC = ##class(Gaia.Service).Process("apl", "/data/in/sample.csv", 100)
+#;
+#; The Service dispatcher routes to the appropriate processor.

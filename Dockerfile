@@ -1,18 +1,8 @@
-ARG IMAGE=intersystems/iris-community:latest-em
-FROM $IMAGE
+FROM ubuntu:24.04
 
-WORKDIR /home/irisowner/dev
-COPY . .
+RUN apt-get update && apt-get install -y curl build-essential && rm -rf /var/lib/apt/lists/*
+WORKDIR /opt/gaia
 
-## Embedded Python environment
-ENV IRISUSERNAME="_SYSTEM"
-ENV IRISPASSWORD="SYS"
-ENV IRISNAMESPACE="USER"
-ENV PYTHON_PATH=/usr/irissys/bin/
-ENV PATH="/usr/irissys/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/irisowner/bin"
+COPY . /opt/gaia
 
-RUN --mount=type=bind,src=.,dst=. \
-    iris start IRIS && \
-	iris merge IRIS merge.cpf && \
-	iris session IRIS < iris.script && \
-    iris stop IRIS quietly safely
+CMD ["/bin/bash"]
