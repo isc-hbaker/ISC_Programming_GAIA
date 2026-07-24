@@ -2,32 +2,45 @@ ROUTINE RunScript
 
 Run()
 {
-    Write !,"==========================================================="
-    Write !,"  Gaia Challenge - Rust Processor Benchmark"
-    Write !,"==========================================================="
+    Write !,"=== Gaia DR3 Variable Star Detector ==="
     Write !
 
-    // Try standard paths - adjust if data is mounted elsewhere
-    Set inputFile = "/home/irisowner/dev/data/in/EpochPhotometry_000000-003111.csv.gz"
-    If '##class(%File).Exists(inputFile) Set inputFile = "/opt/gaia/data/in/EpochPhotometry_000000-003111.csv.gz"
+    Set dataDir   = "/home/irisowner/dev/data/in"
+    Set outFile   = "/home/irisowner/dev/data/out/results.csv"
     Set threshold = 100
 
-    Write "Input: ", inputFile, !
-    Write "Threshold: ", threshold, "%", !
+    // Use Rust engine if binary is present, otherwise pure ObjectScript
+    Set binary = "/home/irisowner/dev/build/rust/gaia_engine"
+    Set useRust = ##class(%File).Exists(binary)
+    Write !,"Engine: ", $Select(useRust: "Rust (high-performance)", 1: "ObjectScript (native IRIS)")
     Write !
 
-    Set startTime = $ZHOROLOG
+    Kill ^Gaia.DataD, ^Gaia.DataI
 
-    Set tSC = ##class(Gaia.RustProcessor).Run(inputFile, threshold)
+    Set rs = ##class(%ResultSet).%New("%File:FileSet")
+    Do rs.Execute(dataDir, "EpochPhotometry_*.csv.gz", , 0)
 
-    Set elapsed = $ZHOROLOG - startTime
-
-    If $$$ISERR(tSC) {
-        Write "ERROR: ", $System.Status.GetErrorText(tSC), !
-        Quit
+    Set fileCount = 0
+    While rs.Next() {
+        Set file = rs.Get("Name")
+        If useRust {
+            Set tSC = ##class(Gaia.RustProcessor).Run(file, threshold, 0)
+        } Else {
+            Set tSC = ##class(Gaia.ObjectScriptProcessor).Run(file, threshold, 0)
+        }
+        If $$$ISERR(tSC) Write !,"  ERROR: ", $System.Status.GetErrorText(tSC)
+        Set fileCount = fileCount + 1
     }
 
-    Write !,"Elapsed time: ", elapsed, " seconds", !
-    Write "Results stored in ^Gaia.DataD and ^Gaia.DataI globals", !
+    Write !
+    Write !,"Processed ", fileCount, " files"
+    Write !,"Writing CSV: ", outFile
+
+    Set tSC = ##class(Gaia.ObjectScriptProcessor).WriteCSV(outFile)
+    If $$$ISERR(tSC) {
+        Write !,"ERROR writing CSV: ", $System.Status.GetErrorText(tSC)
+    } Else {
+        Write !,"Done. Results written to: ", outFile
+    }
     Quit
 }
