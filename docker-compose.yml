@@ -1,5 +1,5 @@
 services:
-  gaia:
+  iris:
     build: .
     container_name: gaia_challenge
     restart: always
