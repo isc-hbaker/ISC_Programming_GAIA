@@ -1,0 +1,33 @@
+ROUTINE RunScript
+
+Run()
+{
+    Write !,"==========================================================="
+    Write !,"  Gaia Challenge - Rust Processor Benchmark"
+    Write !,"==========================================================="
+    Write !
+
+    // Try standard paths - adjust if data is mounted elsewhere
+    Set inputFile = "/home/irisowner/dev/data/in/EpochPhotometry_000000-003111.csv.gz"
+    If '##class(%File).Exists(inputFile) Set inputFile = "/opt/gaia/data/in/EpochPhotometry_000000-003111.csv.gz"
+    Set threshold = 100
+
+    Write "Input: ", inputFile, !
+    Write "Threshold: ", threshold, "%", !
+    Write !
+
+    Set startTime = $ZHOROLOG
+
+    Set tSC = ##class(Gaia.RustProcessor).Run(inputFile, threshold)
+
+    Set elapsed = $ZHOROLOG - startTime
+
+    If $$$ISERR(tSC) {
+        Write "ERROR: ", $System.Status.GetErrorText(tSC), !
+        Quit
+    }
+
+    Write !,"Elapsed time: ", elapsed, " seconds", !
+    Write "Results stored in ^Gaia.DataD and ^Gaia.DataI globals", !
+    Quit
+}
