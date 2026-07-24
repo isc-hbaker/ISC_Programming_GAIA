@@ -1,10 +1,11 @@
-version: '3.8'
 services:
   gaia:
     build: .
     container_name: gaia_challenge
+    restart: always
+    environment:
+      - ISC_CPF_MERGE_FILE=/home/irisowner/dev/merge.cpf
     ports:
       - "52773:52773"
     volumes:
-      - ./src:/opt/gaia/src
-    command: sleep infinity
+      - ./:/home/irisowner/dev

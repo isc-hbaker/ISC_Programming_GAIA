@@ -9,7 +9,7 @@ Run()
     Set outFile   = "/home/irisowner/dev/data/out/results.csv"
     Set threshold = 100
 
-    // Use Rust engine if binary is present, otherwise pure ObjectScript
+    // Use Rust engine if binary present, otherwise pure ObjectScript
     Set binary = "/home/irisowner/dev/build/rust/gaia_engine"
     Set useRust = ##class(%File).Exists(binary)
     Write !,"Engine: ", $Select(useRust: "Rust (high-performance)", 1: "ObjectScript (native IRIS)")
@@ -28,7 +28,7 @@ Run()
         } Else {
             Set tSC = ##class(Gaia.ObjectScriptProcessor).Run(file, threshold, 0)
         }
-        If $$$ISERR(tSC) Write !,"  ERROR: ", $System.Status.GetErrorText(tSC)
+        If tSC '= 1 Write !,"  ERROR: ", $System.Status.GetErrorText(tSC)
         Set fileCount = fileCount + 1
     }
 
@@ -37,7 +37,7 @@ Run()
     Write !,"Writing CSV: ", outFile
 
     Set tSC = ##class(Gaia.ObjectScriptProcessor).WriteCSV(outFile)
-    If $$$ISERR(tSC) {
+    If tSC '= 1 {
         Write !,"ERROR writing CSV: ", $System.Status.GetErrorText(tSC)
     } Else {
         Write !,"Done. Results written to: ", outFile

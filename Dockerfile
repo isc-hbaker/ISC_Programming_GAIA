@@ -1,4 +1,4 @@
-ARG IMAGE=intersystemsdc/iris-community
+ARG IMAGE=intersystems/iris-community:latest-em
 FROM $IMAGE
 
 USER root
@@ -20,7 +20,8 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --de
 USER irisowner
 WORKDIR /home/irisowner/dev
 
-RUN --mount=type=bind,src=.,dst=/home/irisowner/dev \
-    iris start IRIS && \
+COPY . .
+
+RUN iris start IRIS && \
     iris session IRIS < iris.script && \
     iris stop IRIS quietly

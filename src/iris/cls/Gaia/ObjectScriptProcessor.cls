@@ -5,21 +5,15 @@
 /// during the scan, then a single ordered read to produce the CSV. No ORM, no schema
 /// migrations, just direct key-value persistence with a free index global for sorting.
 ///
-/// The main challenge was parsing the ECSV format: quoted fields containing comma-separated
-/// arrays, with #comment lines before the header. ObjectScript's $Extract loop handles the
-/// quote-aware field extraction reliably, and $ZF(-1) with gunzip handles decompression.
-/// For throughput on 20 files, the Rust engine is preferred; ObjectScript is the pure-IRIS fallback.
+/// The main challenge was parsing the ECSV format: 48 columns, quoted fields containing
+/// comma-separated arrays, with # comment lines before the header. The Rust engine handles
+/// the heavy parsing work with parallel processing; this class provides the pure-IRIS
+/// fallback and the final CSV output step.
 Class Gaia.ObjectScriptProcessor Extends %RegisteredObject
 {
 
-// Column indices in the Gaia DR3 epoch photometry CSV (1-based)
-Parameter SOURCE_ID_COL = 2;
-Parameter BP_FLUX_COL   = 12;
-Parameter RP_FLUX_COL   = 17;
-
-/// Processes a single .csv or .csv.gz input file.
-/// Results accumulate in ^Gaia.DataD / ^Gaia.DataI globals.
-/// Set pClearFirst=0 when calling in a batch so prior results are preserved.
+/// Processes a single .csv or .csv.gz file using pure ObjectScript.
+/// Set pClearFirst=0 when calling in a batch to preserve prior results.
 ClassMethod Run(
     pInputFile As %String,
     pThreshold As %Numeric = 100,
@@ -32,11 +26,13 @@ ClassMethod Run(
     If pClearFirst Kill ^Gaia.DataD, ^Gaia.DataI
 
     Try {
-        // Decompress .gz to temp file if needed
-        Set actualFile = pInputFile, tmpFile = ""
-        If ($ZCONVERT($E(pInputFile, *-2, *), "L") = ".gz") {
+        Set actualFile = pInputFile
+        Set tmpFile = ""
+        If ($ZCONVERT($Extract(pInputFile, *-2, *), "L") = ".gz") {
             Set tmpFile = "/tmp/gaia_" _ $Job _ ".csv"
-            If $ZF(-1, "gunzip -c """ _ pInputFile _ """ > """ _ tmpFile _ """") '= 0 {
+            Set q = $Char(34)
+            Set rc = $ZF(-1, "gunzip -c " _ q _ pInputFile _ q _ " > " _ q _ tmpFile _ q)
+            If rc '= 0 {
                 Set tSC = $$$ERROR($$$GeneralError, "gunzip failed: " _ pInputFile)
                 Quit
             }
@@ -47,45 +43,44 @@ ClassMethod Run(
         Set tSC = stream.LinkToFile(actualFile)
         If $$$ISERR(tSC) Quit
 
-        // Skip ECSV comment lines (start with #) and the header row
-        Set line = ""
+        // Skip ECSV # comment lines, then skip the header row
         While 'stream.AtEnd {
             Set line = stream.ReadLine()
-            Continue:$Extract(line,1)="#"
-            // First non-comment line is the header — skip it and stop
-            Quit
+            If $Extract(line, 1) '= "#" Quit
         }
 
-        Set recordCount = 0, outputCount = 0
+        Set recordCount = 0
+        Set outputCount = 0
 
         While 'stream.AtEnd {
             Set line = stream.ReadLine()
-            Continue:line=""
+            If line = "" Continue
             Set recordCount = recordCount + 1
 
-            Set sourceId = ..GetField(line, ..#SOURCE_ID_COL)
-            Continue:sourceId=""
+            // source_id=col 2, bp_flux=col 12, rp_flux=col 17
+            Set sourceId = ..GetField(line, 2)
+            If sourceId = "" Continue
 
-            Set bpRaw = ..GetField(line, ..#BP_FLUX_COL)
-            Set rpRaw = ..GetField(line, ..#RP_FLUX_COL)
+            Set bpRaw = ..GetField(line, 12)
+            Set rpRaw = ..GetField(line, 17)
 
             Do ..ExtractMinMax(bpRaw, .bpMin, .bpMax)
             Do ..ExtractMinMax(rpRaw, .rpMin, .rpMax)
 
-            // Skip objects with no valid flux in either band
-            If (bpMin = 0 && bpMax = 0) || (rpMin = 0 && rpMax = 0) Continue
+            If (bpMin = 0) && (bpMax = 0) Continue
+            If (rpMin = 0) && (rpMax = 0) Continue
 
-            // Percentage change = ((max - min) / min) * 100
-            Set bpChange = 0, rpChange = 0
+            Set bpChange = 0
+            Set rpChange = 0
             If bpMin > 0 Set bpChange = ((bpMax - bpMin) / bpMin) * 100
             If rpMin > 0 Set rpChange = ((rpMax - rpMin) / rpMin) * 100
 
-            Set maxPctChange = $Select(bpChange > rpChange: bpChange, 1: rpChange)
+            Set maxPct = $Select(bpChange > rpChange: bpChange, 1: rpChange)
 
-            If maxPctChange >= pThreshold {
+            If maxPct >= pThreshold {
                 Set outputCount = outputCount + 1
-                Set ^Gaia.DataD(sourceId) = $LB(sourceId, bpMin, bpMax, rpMin, rpMax, maxPctChange)
-                Set ^Gaia.DataI("Change", maxPctChange, sourceId) = ""
+                Set ^Gaia.DataD(sourceId) = $ListBuild(sourceId, bpMin, bpMax, rpMin, rpMax, maxPct)
+                Set ^Gaia.DataI("Change", maxPct, sourceId) = ""
             }
         }
 
@@ -95,7 +90,7 @@ ClassMethod Run(
 
     If tmpFile '= "" Do ##class(%File).Delete(tmpFile)
 
-    Write !,"  ", pInputFile, " -> ", outputCount, " matches (", recordCount, " records, ", $FNumber($ZH-startTime,"F",2), "s)"
+    Write !,"  ObjectScript: ", outputCount, " matches / ", recordCount, " records (", $FNumber($ZH - startTime, "F", 2), "s)"
     Quit tSC
 }
 
@@ -110,63 +105,71 @@ ClassMethod WriteCSV(pOutputFile As %String) As %Status
 
     Do stream.WriteLine("source_id,bp_min_flux,bp_max_flux,rp_min_flux,rp_max_flux,percentage_change")
 
-    Set sourceId = ""
+    Set key = ""
     For {
-        Set sourceId = $Order(^Gaia.DataD(sourceId))
-        Quit:sourceId=""
-        Set row = ^Gaia.DataD(sourceId)
-        Do stream.WriteLine($LG(row,1)_","_$LG(row,2)_","_$LG(row,3)_","_$LG(row,4)_","_$LG(row,5)_","_$LG(row,6))
+        Set key = $Order(^Gaia.DataD(key))
+        If key = "" Quit
+        Set row = ^Gaia.DataD(key)
+        Do stream.WriteLine(
+            $ListGet(row, 1) _ "," _
+            $ListGet(row, 2) _ "," _
+            $ListGet(row, 3) _ "," _
+            $ListGet(row, 4) _ "," _
+            $ListGet(row, 5) _ "," _
+            $ListGet(row, 6))
     }
 
     Quit stream.%Save()
 }
 
 /// Extracts the Nth field (1-based) from a quoted CSV line.
-/// Handles quoted fields that contain commas.
 ClassMethod GetField(line As %String, n As %Integer) As %String [ Private ]
 {
-    Set fieldNum = 0, inQuote = 0, start = 1
+    Set fieldNum = 0, inQuote = 0, start = 1, result = ""
     Set len = $Length(line)
-
+    Set dq = $Char(34)
     For i = 1:1:len {
         Set ch = $Extract(line, i)
-        If ch = """" {
+        If ch = dq {
             Set inQuote = 'inQuote
-        } ElseIf (ch = ",") && ('inQuote) {
-            Set fieldNum = fieldNum + 1
-            If fieldNum = n {
-                Set result = $Extract(line, start, i-1)
-                If $Extract(result,1) = """" Set result = $Extract(result, 2, $Length(result)-1)
-                Quit
-            }
-            Set start = i + 1
+            Continue
         }
+        If ch '= "," Continue
+        If inQuote Continue
+        Set fieldNum = fieldNum + 1
+        If fieldNum = n {
+            Set result = $Extract(line, start, i - 1)
+            Quit
+        }
+        Set start = i + 1
     }
-
-    // Last field
-    If fieldNum + 1 = n {
+    If (result = "") && (fieldNum + 1 = n) {
         Set result = $Extract(line, start, len)
-        If $Extract(result,1) = """" Set result = $Extract(result, 2, $Length(result)-1)
     }
-
-    Quit $Get(result, "")
+    If $Extract(result, 1) = dq {
+        Set result = $Extract(result, 2, $Length(result) - 1)
+    }
+    Quit result
 }
 
-/// Parses "[val,val,NaN,...]" returning valid min/max.
-/// Returns (0,0) if all values are invalid.
+/// Parses "[v,v,NaN,...]" returning valid min/max. Returns (0,0) if all invalid.
 ClassMethod ExtractMinMax(pRaw As %String, Output pMin As %Float, Output pMax As %Float) [ Private ]
 {
-    Set pMin = 1e15, pMax = -1e15
-    // Strip outer brackets
+    Set pMin = 999999999999
+    Set pMax = -999999999999
     Set clean = $Translate(pRaw, "[]", "")
-    For i = 1:1:$Length(clean, ",") {
+    Set pieces = $Length(clean, ",")
+    For i = 1:1:pieces {
         Set val = $ZStrip($Piece(clean, ",", i), "<>W")
-        Continue:(val = "") || (val = "NaN") || ('$IsValidNum(val)) || (val <= 0)
+        If val = "" Continue
+        If val = "NaN" Continue
+        If '$IsValidNum(val) Continue
+        If val <= 0 Continue
         If val < pMin Set pMin = val
         If val > pMax Set pMax = val
     }
-    If pMin = 1e15  Set pMin = 0
-    If pMax = -1e15 Set pMax = 0
+    If pMin = 999999999999 Set pMin = 0
+    If pMax = -999999999999 Set pMax = 0
 }
 
 }
